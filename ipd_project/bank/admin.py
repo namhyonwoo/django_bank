@@ -14,9 +14,13 @@ class UserAdmin(BaseUserAdmin):
 
 admin.site.unregister(Group)
 admin.site.register(User, UserAdmin)
-admin.site.register(Account)
+# admin.site.register(Account)
 admin.site.register(AccountType)
 
 @admin.register(AccountTransferReport)
 class AccountTransferReportAdmin(admin.ModelAdmin):
     list_display = ('sender_account', 'receiver_account', 'sended_label', 'received_label', 'remittance', 'fee', 'reg_date')
+
+@admin.register(Account)
+class AccountAdmin(admin.ModelAdmin):
+    list_display = ('account_id', 'user', 'amount', 'account_type', 'exception_limit', 'limit_onetime', 'limit_oneday')

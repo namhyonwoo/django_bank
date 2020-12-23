@@ -7,18 +7,23 @@ from .models import User, Account, AccountTransferReport
 from django.core import serializers
 import json
 from django.utils import timezone
+from django.db import transaction
+
 
 def index(request):
-
     return render(request, 'index.html')
 
 
-class Example:
-    queue =[]# Access through class
+# 모든 사용자와 공유할 수있는 스태틱 큐를 생성
+# 송신자 계좌를 구분자로 갖고, 총 송금가능 누적 정보를 담는다
+class StaticQueue:
+    queue =[] # Access through class
 
-instance = Example()
+# 큐를 담는 클래스 생성    
+instance = StaticQueue()
 
 # 계좌이체 실행
+# 트랜잭션 추가
 def transfer(request):
     
     # logined user
@@ -35,6 +40,7 @@ def transfer(request):
             'is_succeful'  : False,
             'error'  : ''
         }
+        # 받은 파라미터 
         received_json_data = json.loads(request.body.decode("utf-8"))
         sender_account = received_json_data['sender_account']
         receiver_account = received_json_data['receiver_account']
@@ -42,69 +48,64 @@ def transfer(request):
         received_label = received_json_data['received_label']
         remittance = received_json_data['remittance']
         fee = received_json_data['fee']
+
         # 파라미터가 비었다면
         if sender_account is None or receiver_account is None or sended_label is None or received_label is None or remittance is None or fee is None:
             response['error'] = 'param error'
             return HttpResponse(json.dumps(response), 'application/javascript; charset=utf8')
-
-        ready_amount = int(remittance)+int(fee)
+       
+        # 송금액과 수수료를 정수로 바꿈
+        remittance = int(remittance)
+        fee = int(fee)
+        # 통장에서 차감될 금액
+        ready_amount = remittance+fee
         #  내 계좌에서 금액 남았는지 다시한번 조회
         my_account = Account.objects.get(pk=sender_account)
 
-        my = None
+        # 큐에서 같은 계좌아이디 값의 대기정보 객체를 찾음
+        trasfer_info = None
         for item in queue:
             if item['id'] == sender_account:
-                my = item
-
-        print('my is')
-        print(my)
-
-        if my is not None:
-            if my['expectTotalAmount']+ready_amount > my_account.amount:
+                trasfer_info = item
+        # 찾았다면
+        if trasfer_info is not None:
+            if trasfer_info['expectTotalAmount']+ready_amount > my_account.amount:
                 response['error'] = '남은금액 없음'
                 return HttpResponse(json.dumps(response), 'application/javascript; charset=utf8')
             else:
-                print('있고 더했다')
-                my['expectTotalAmount'] += ready_amount
+                trasfer_info['expectTotalAmount'] += ready_amount
+        # 없다면 만든다
         else:
-            print('my없음')
-            my = {
+            trasfer_info = {
                 'id' : sender_account,
                 'expectTotalAmount' : ready_amount
             }
-            queue.append(my)
-            # for item in queue:
-            #     if item['id'] == my['id']:
-            #         my = item
+            queue.append(trasfer_info)
 
         try:
-            # test code
-            # 실패
+            # Start test code
             validate_transfer()
+            # END test code
 
             AccountTransferReport.objects.create(sender_account=Account.objects.get(pk=sender_account), receiver_account=Account.objects.get(pk=receiver_account), sended_label=sended_label, received_label=received_label, remittance=remittance, fee=fee)
             
-            # refresh form db
+            # 저장전에 총액을 다시 불러온다 refresh form db
             my_account.refresh_from_db()
-            print('my_account amount is')
-            print(my_account.amount)
-            print('ready_amount is')
-            print(ready_amount)
-            
-            my_account.amount = my_account.amount-ready_amount
-            my_account.save()
-            my['expectTotalAmount'] -= ready_amount
-            print('반영됨=========')
-            
-            print('my: '+str(my))
-            print('queue: '+str(queue))
+            with transaction.atomic():
+                my_account.amount = my_account.amount-ready_amount
+                my_account.save()
+                # 받는계좌에 더함
+                receiver_account = Account.objects.get(pk=receiver_account)
+                receiver_account.amount += remittance
+                receiver_account.save()
 
+            trasfer_info['expectTotalAmount'] -= ready_amount
             response['is_succeful'] = True
 
         except Exception as e:
             print('예외가 발생했습니다.', e)
-            my['expectTotalAmount'] -= ready_amount
-            response['error'] = e
+            trasfer_info['expectTotalAmount'] -= ready_amount
+            response['error'] = e.__str__
 
 
         return HttpResponse(json.dumps(response), 'application/javascript; charset=utf8')
@@ -193,13 +194,15 @@ def getFee(request):
     count = 0 # 무료건수확인변수
     # 당월 이체건수 조회 후 (내계좌인데 타행계좌 또는 타계좌) n회 이하면 무료
     today = timezone.now()
-    reports = AccountTransferReport.objects.filter(reg_date__year=today.year, reg_date__month=today.month, sender_account=sender_account).select_related('sender_account','receiver_account').all()
+    reports = AccountTransferReport.objects.filter(reg_date__year=today.year, reg_date__month=today.month, sender_account=sender_account).select_related('sender_account','receiver_account')
+
+    # print(reports.query)
 
     for report in reports:
         if report.sender_account.user == report.receiver_account.user:
             # 보낸 유저 아이디와 받은 유저 아이디 같으면서 통장종류가 같은 것을 제외
             if report.sender_account.account_type == report.receiver_account.account_type:
-                print(report.receiver_account)
+                # print(report.receiver_account)
                 continue
         count+=1
 
