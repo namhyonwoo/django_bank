@@ -8,36 +8,37 @@ from django.core import serializers
 import json
 from django.utils import timezone
 from django.db import transaction
+from celery import shared_task
+import redis
+from .redisqueue import RedisQueue
 
+# 모든 사용자와 공유할 수있는 스태틱 큐를 생성
+# 송신자 계좌를 구분자로 갖고, 총 송금가능 누적 정보를 담는다
+# class StaticQueue:
+#     # queue =[] # Access through class
+#     queue = redis.Redis(host='localhost', port=6379, db=0)
+# instance = StaticQueue()
 
 def index(request):
     return render(request, 'index.html')
 
-
-# 모든 사용자와 공유할 수있는 스태틱 큐를 생성
-# 송신자 계좌를 구분자로 갖고, 총 송금가능 누적 정보를 담는다
-class StaticQueue:
-    queue =[] # Access through class
-
 # 큐를 담는 클래스 생성    
-instance = StaticQueue()
+
+rq = RedisQueue('my-queue', host='localhost', port=6379, db=0)
 
 # 계좌이체 실행
 # 트랜잭션 추가
 def transfer(request):
-    
+
+    r = rq.getInstance()
+
     # logined user
     user = request.user
 
     if request.method == 'POST':
 
-        queue = instance.queue 
-
-        print("queue is")
-        print(queue)
-
         response = {
-            'is_succeful'  : False,
+            'is_succeful'  : True,
             'error'  : ''
         }
         # 받은 파라미터 
@@ -58,55 +59,39 @@ def transfer(request):
         remittance = int(remittance)
         fee = int(fee)
         # 통장에서 차감될 금액
-        ready_amount = remittance+fee
+        ready_amount = remittance + fee
         #  내 계좌에서 금액 남았는지 다시한번 조회
         my_account = Account.objects.get(pk=sender_account)
 
         # 큐에서 같은 계좌아이디 값의 대기정보 객체를 찾음
-        trasfer_info = None
-        for item in queue:
-            if item['id'] == sender_account:
-                trasfer_info = item
+        trasfer_info = r.get(sender_account)
+
         # 찾았다면
         if trasfer_info is not None:
-            if trasfer_info['expectTotalAmount']+ready_amount > my_account.amount:
-                response['error'] = '남은금액 없음'
-                return HttpResponse(json.dumps(response), 'application/javascript; charset=utf8')
-            else:
-                trasfer_info['expectTotalAmount'] += ready_amount
-        # 없다면 만든다
+            trasfer_info_d = json.loads(trasfer_info)
+            # print(f"founded expectTotalAmount : {trasfer_info_d['expectTotalAmount']}")
+            # print(f"ready_amount : {ready_amount}")
+            # print(f"my_account amount : {my_account.amount}")
+            # print(f"sum : {trasfer_info_d['expectTotalAmount']+ready_amount}")
+        # 없다면 
         else:
-            trasfer_info = {
+            trasfer_info_d = {
                 'id' : sender_account,
-                'expectTotalAmount' : ready_amount
+                'expectTotalAmount' : 0
             }
-            queue.append(trasfer_info)
-
-        try:
-            # Start test code
-            validate_transfer()
-            # END test code
-
-            AccountTransferReport.objects.create(sender_account=Account.objects.get(pk=sender_account), receiver_account=Account.objects.get(pk=receiver_account), sended_label=sended_label, received_label=received_label, remittance=remittance, fee=fee)
             
-            # 저장전에 총액을 다시 불러온다 refresh form db
-            my_account.refresh_from_db()
-            with transaction.atomic():
-                my_account.amount = my_account.amount-ready_amount
-                my_account.save()
-                # 받는계좌에 더함
-                receiver_account = Account.objects.get(pk=receiver_account)
-                receiver_account.amount += remittance
-                receiver_account.save()
+        # 남은금액이 모자라면
+        if trasfer_info_d['expectTotalAmount']+ready_amount > my_account.amount:
+            response['is_succeful'] = False
+            response['error'] = '남은금액 없음'
+            return HttpResponse(json.dumps(response), 'application/javascript; charset=utf8')
+        else:
+        # 충분하다면
+            trasfer_info_d['expectTotalAmount'] += ready_amount
+            trasfer_info = json.dumps(trasfer_info_d)
+            r.set(sender_account, trasfer_info)
 
-            trasfer_info['expectTotalAmount'] -= ready_amount
-            response['is_succeful'] = True
-
-        except Exception as e:
-            print('예외가 발생했습니다.', e)
-            trasfer_info['expectTotalAmount'] -= ready_amount
-            response['error'] = e.__str__
-
+        taskTansfer.delay(received_json_data)
 
         return HttpResponse(json.dumps(response), 'application/javascript; charset=utf8')
     
@@ -117,6 +102,54 @@ def transfer(request):
             'account_list' : account_list
         }
         return render(request, 'bank/transfer.html', context)
+
+@shared_task
+def taskTansfer(received_json_data):
+    
+    r = rq.getInstance()
+    
+    sender_account = received_json_data['sender_account']
+    receiver_account = received_json_data['receiver_account']
+    sended_label = received_json_data['sended_label']
+    received_label = received_json_data['received_label']
+    remittance = int(received_json_data['remittance'])
+    fee = int(received_json_data['fee'])
+    ready_amount = remittance + fee
+
+    try:
+        # Start test code
+        validate_transfer()
+        # END test code
+
+        AccountTransferReport.objects.create(sender_account=Account.objects.get(pk=sender_account), receiver_account=Account.objects.get(pk=receiver_account), sended_label=sended_label, received_label=received_label, remittance=remittance, fee=fee)
+        
+        # 저장전에 총액을 다시 불러온다 refresh form db
+        my_account = Account.objects.get(pk=sender_account)
+        # my_account.refresh_from_db()
+
+        with transaction.atomic():
+            # 내 계좌에서 빼고
+            my_account.amount -= ready_amount
+            my_account.save()
+
+            # 받는계좌에 더함
+            receiver_account = Account.objects.get(pk=receiver_account)
+            receiver_account.amount += remittance
+            receiver_account.save()
+
+    except Exception as e:
+        print('예외가 발생했습니다.', e)
+
+    finally:   
+        trasfer_info = r.get(sender_account)
+        print(trasfer_info)
+        trasfer_info_d = json.loads(trasfer_info)
+        trasfer_info_d['expectTotalAmount'] -= ready_amount
+        if trasfer_info_d['expectTotalAmount'] <= 0:
+            r.delete(sender_account)
+        else:
+            trasfer_info = json.dumps(trasfer_info_d)
+            r.set(sender_account, trasfer_info)
 
 
 

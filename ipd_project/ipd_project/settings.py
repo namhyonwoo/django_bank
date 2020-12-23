@@ -120,3 +120,24 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 AUTH_USER_MODEL = 'bank.User'
+
+# Celery Configuration Options
+CELERY_TIMEZONE = "Asia/Seoul"
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+# Celery settings
+
+# CELERY_BROKER_URL = 'amqp://guest:guest@localhost'
+CELERY_BROKER_URL = 'redis://localhost:6379/0' 
+# CELERY_RESULT_BACKEND = 'redis://localhost:6379/0' # your redis url for getting result
+CELERY_RESULT_BACKEND = 'db+sqlite:///results.sqlite'
+
+
+#: Only add pickle to this list if your broker is secured
+#: from unwanted access (see userguide/security.html)
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+
+# CELERY_TAST_SERIALIZER = 'json' 
+# CELERY_RESULT_SERIALIZER = 'json' 
+# CELERY_TIMEZONE = 'Asia/Seoul' # Define the timezone for the scheduler, Celery beat.

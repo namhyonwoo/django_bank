@@ -53,7 +53,8 @@ const transfer = (function(){
 			complete:function(){
 				// hide gif here, eg:
 				$("#wait").css("display", "none");
-			}
+            },
+            timeout: 3000 // sets timeout to 3 seconds
 		});
 	}
 
