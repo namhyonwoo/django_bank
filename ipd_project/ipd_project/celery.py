@@ -20,3 +20,13 @@ app.autodiscover_tasks()
 @app.task(bind=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')
+
+from time import sleep
+from random import uniform as uniform_random
+
+@app.task
+def add(x, y):
+
+    sleep(uniform_random(7, 30))
+
+    return x + y
