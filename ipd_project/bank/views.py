@@ -69,10 +69,6 @@ def transfer(request):
         # 찾았다면
         if trasfer_info is not None:
             trasfer_info_d = json.loads(trasfer_info)
-            # print(f"founded expectTotalAmount : {trasfer_info_d['expectTotalAmount']}")
-            # print(f"ready_amount : {ready_amount}")
-            # print(f"my_account amount : {my_account.amount}")
-            # print(f"sum : {trasfer_info_d['expectTotalAmount']+ready_amount}")
         # 없다면 
         else:
             trasfer_info_d = {
@@ -123,17 +119,16 @@ def taskTansfer(received_json_data):
 
         AccountTransferReport.objects.create(sender_account=Account.objects.get(pk=sender_account), receiver_account=Account.objects.get(pk=receiver_account), sended_label=sended_label, received_label=received_label, remittance=remittance, fee=fee)
         
-        # 저장전에 총액을 다시 불러온다 refresh form db
-        my_account = Account.objects.get(pk=sender_account)
-        # my_account.refresh_from_db()
 
         with transaction.atomic():
+            # 저장전에 총액을 다시 불러온다 refresh form db
+            my_account = Account.objects.select_for_update().get(pk=sender_account)
             # 내 계좌에서 빼고
             my_account.amount -= ready_amount
             my_account.save()
 
             # 받는계좌에 더함
-            receiver_account = Account.objects.get(pk=receiver_account)
+            receiver_account = Account.objects.select_for_update().get(pk=receiver_account)
             receiver_account.amount += remittance
             receiver_account.save()
 
@@ -142,7 +137,7 @@ def taskTansfer(received_json_data):
 
     finally:   
         trasfer_info = r.get(sender_account)
-        print(trasfer_info)
+        # print(trasfer_info)
         trasfer_info_d = json.loads(trasfer_info)
         trasfer_info_d['expectTotalAmount'] -= ready_amount
         if trasfer_info_d['expectTotalAmount'] <= 0:
@@ -157,9 +152,8 @@ from time import sleep
 from random import uniform as uniform_random
 def validate_transfer():
     """
-    Internal Product Developer 기술 과제 2
-    이 함수는 본래 이체 결과를 검증하기 위한 함수입니다.
-    7 - 30초의 지연을 발생시킬 뿐이지만, 편의를 위해 본래의 역할을 한다고 가정해주세요.
+    이체 결과를 검증하기 위한 함수입니다.
+    7 - 30초의 지연을 발생
     """
     sleep(uniform_random(7, 30))
     return True
