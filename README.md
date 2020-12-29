@@ -14,6 +14,12 @@
 2. 계좌이체 가능해야함
 3. 계좌이체시 이체작업 직전에 슬립 함수로 임의로 병목을 준 상황에서 다른 입금 요청시 정상적으로 처리가 되어야하고 클라이언트는 바로 응답(2초이내)을 받아야 함.
 
+데이터베이스
+------------
+USER(id, username, total_account, fee_free_of_day)
+ACCOUNT(account_id, user, account_type, amount, exception_limit, limit_onetime, limit_oneday)
+ACCOUNT_TYPE(id, name, default_limit_onetime, default_limit_oneday)
+ACCOUNT_TRANSFER_REPORT(sender_account, receiver_account, sended_label, received_label, remittance, fee, reg_date)
 
 구현컨셉
 -------------
