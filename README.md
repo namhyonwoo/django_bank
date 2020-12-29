@@ -16,10 +16,14 @@
 
 데이터베이스
 ------------
-USER(id, username, total_account, fee_free_of_day)
-ACCOUNT(account_id, user, account_type, amount, exception_limit, limit_onetime, limit_oneday)
-ACCOUNT_TYPE(id, name, default_limit_onetime, default_limit_oneday)
-ACCOUNT_TRANSFER_REPORT(sender_account, receiver_account, sended_label, received_label, remittance, fee, reg_date)
+> USER(id, username, total_account, fee_free_of_day)
+
+> ACCOUNT(account_id, user, account_type, amount, exception_limit, limit_onetime, limit_oneday)
+
+> ACCOUNT_TYPE(id, name, default_limit_onetime, default_limit_oneday)
+
+> ACCOUNT_TRANSFER_REPORT(sender_account, receiver_account, sended_label, received_label, remittance, fee, reg_date)
+
 
 구현컨셉
 -------------
